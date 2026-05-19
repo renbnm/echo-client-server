@@ -1,5 +1,7 @@
 #include "echo.h"
 
+using namespace std;
+
 struct Param {
     bool echo{false};
     bool broadcast{false};
@@ -10,6 +12,7 @@ struct Param {
 
         int p = atoi(argv[1]);
         if (p <= 0 || p > 65535) return false;
+
         port = p;
 
         for (int i = 2; i < argc; i++) {
@@ -19,7 +22,6 @@ struct Param {
             }
 
             if (strcmp(argv[i], "-b") == 0) {
-                echo = true;
                 broadcast = true;
                 continue;
             }
@@ -31,22 +33,34 @@ struct Param {
     }
 } param;
 
-std::vector<int> clients;
-std::mutex mtx;
+vector<int> clients;
+mutex mtx;
 
-void usage() {
-    printf("syntax: echo-server <port> [-e] [-b]\n");
-    printf("sample: echo-server 1234 -e -b\n");
-}
+int serverSd = -1;
+volatile sig_atomic_t stopFlag = 0;
 
 void addClient(int sd) {
-    std::lock_guard<std::mutex> lock(mtx);
+    lock_guard<mutex> lock(mtx);
     clients.push_back(sd);
 }
 
 void removeClient(int sd) {
-    std::lock_guard<std::mutex> lock(mtx);
-    clients.erase(std::remove(clients.begin(), clients.end(), sd), clients.end());
+    lock_guard<mutex> lock(mtx);
+    clients.erase(remove(clients.begin(), clients.end(), sd), clients.end());
+}
+
+vector<int> getClients() {
+    lock_guard<mutex> lock(mtx);
+    return clients;
+}
+
+void sigintHandler(int) {
+    stopFlag = 1;
+
+    if (serverSd != -1) {
+        close(serverSd);
+        serverSd = -1;
+    }
 }
 
 void recvThread(int sd) {
@@ -56,7 +70,7 @@ void recvThread(int sd) {
     static const int BUFSIZE = 65536;
     char buf[BUFSIZE];
 
-    while (true) {
+    while (!stopFlag) {
         ssize_t res = recv(sd, buf, BUFSIZE, 0);
 
         if (res == 0) {
@@ -65,7 +79,7 @@ void recvThread(int sd) {
         }
 
         if (res == -1) {
-            myerror("recv");
+            if (!stopFlag) myerror("recv");
             break;
         }
 
@@ -73,26 +87,16 @@ void recvThread(int sd) {
         fflush(stdout);
 
         if (param.echo) {
-            if (param.broadcast) {
-                std::vector<int> copiedClients;
-
-                {
-                    std::lock_guard<std::mutex> lock(mtx);
-                    copiedClients = clients;
-                }
-
-                for (int c : copiedClients) {
-                    if (!sendAll(c, buf, res)) {
-                        myerror("send");
-                    }
-                }
-            } else {
-                if (!sendAll(sd, buf, res)) {
-                    myerror("send");
-                    break;
-                }
+            if (!sendAll(sd, buf, res)) {
+                myerror("send");
+                break;
             }
         }
+
+        if (param.broadcast)
+            for (int c : getClients())
+                if (!sendAll(c, buf, res))
+                    shutdown(c, SHUT_RDWR);
     }
 
     removeClient(sd);
@@ -104,11 +108,13 @@ void recvThread(int sd) {
 
 int main(int argc, char* argv[]) {
     if (!param.parse(argc, argv)) {
-        usage();
+        printf("syntax: echo-server <port> [-e] [-b]\n");
+        printf("sample: echo-server 1234 -e -b\n");
         return -1;
     }
 
     signal(SIGPIPE, SIG_IGN);
+    signal(SIGINT, sigintHandler);
 
     int sd = socket(AF_INET, SOCK_STREAM, 0);
     if (sd == -1) {
@@ -116,9 +122,11 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
+    serverSd = sd;
+
     int optval = 1;
     if (setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval)) == -1) {
-        myerror("setsockopt");
+        myerror("setsockopt");  
         close(sd);
         return -1;
     }
@@ -145,21 +153,32 @@ int main(int argc, char* argv[]) {
     printf("server started\n");
     fflush(stdout);
 
-    while (true) {
+    while (!stopFlag) {
         struct sockaddr_in clientAddr;
         socklen_t len = sizeof(clientAddr);
 
         int newsd = accept(sd, (struct sockaddr*)&clientAddr, &len);
         if (newsd == -1) {
+            if (stopFlag) break;
+
             myerror("accept");
             continue;
         }
 
         addClient(newsd);
+        thread(recvThread, newsd).detach();
+    }
+    
+    for (int c : getClients())
+        shutdown(c, SHUT_RDWR);
 
-        std::thread(recvThread, newsd).detach();
+    if (serverSd != -1) {
+        close(serverSd);
+        serverSd = -1;
     }
 
-    close(sd);
+    printf("server closed\n");
+    fflush(stdout);
+
     return 0;
 }

@@ -32,7 +32,6 @@ inline bool sendAll(int sd, const char* buf, ssize_t len) {
 #ifdef MSG_NOSIGNAL
         flags = MSG_NOSIGNAL;
 #endif
-
         ssize_t res = send(sd, buf + sent, len - sent, flags);
         if (res <= 0) return false;
 

@@ -47,7 +47,7 @@ void recvThread(int sd) {
     fflush(stdout);
 
     close(sd);
-    exit(0);
+    _exit(0);
 }
 
 int main(int argc, char* argv[]) {

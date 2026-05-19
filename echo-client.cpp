@@ -1,5 +1,7 @@
 #include "echo.h"
 
+using namespace std;
+
 struct Param {
     char* ip{nullptr};
     char* port{nullptr};
@@ -16,11 +18,6 @@ struct Param {
         return true;
     }
 } param;
-
-void usage() {
-    printf("syntax: echo-client <ip> <port>\n");
-    printf("sample: echo-client 127.0.0.1 1234\n");
-}
 
 void recvThread(int sd) {
     printf("connected\n");
@@ -55,7 +52,8 @@ void recvThread(int sd) {
 
 int main(int argc, char* argv[]) {
     if (!param.parse(argc, argv)) {
-        usage();
+        printf("syntax: echo-client <ip> <port>\n");
+        printf("sample: echo-client 127.0.0.1 1234\n");
         return -1;
     }
 
@@ -83,9 +81,7 @@ int main(int argc, char* argv[]) {
         sd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
         if (sd == -1) continue;
 
-        if (connect(sd, ai->ai_addr, ai->ai_addrlen) == 0) {
-            break;
-        }
+        if (connect(sd, ai->ai_addr, ai->ai_addrlen) == 0) break;
 
         myerror("connect");
         close(sd);
@@ -99,18 +95,12 @@ int main(int argc, char* argv[]) {
         return -1;
     }
 
-    std::thread(recvThread, sd).detach();
+    thread(recvThread, sd).detach();
 
     while (true) {
-        std::string s;
+        string s;
 
-        if (!std::getline(std::cin, s)) {
-            break;
-        }
-
-        if (s == "quit") {
-            break;
-        }
+        if (!getline(cin, s)) break;
 
         s += "\r\n";
 

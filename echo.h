@@ -5,6 +5,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdint.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include <arpa/inet.h>
@@ -17,7 +18,6 @@
 #include <thread>
 #include <mutex>
 #include <algorithm>
-#include <csignal>
 
 inline void myerror(const char* msg) {
     fprintf(stderr, "%s %s %d\n", msg, strerror(errno), errno);
@@ -28,6 +28,7 @@ inline bool sendAll(int sd, const char* buf, ssize_t len) {
 
     while (sent < len) {
         int flags = 0;
+
 #ifdef MSG_NOSIGNAL
         flags = MSG_NOSIGNAL;
 #endif
